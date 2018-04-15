@@ -63,7 +63,7 @@ def parseDisplayname(dir):
     displaydf = pd.DataFrame(columns = ['roomname','displayname'])    
     for file in os.listdir(dir):
         chatroomname = file
-        with open(basepath + file,'r') as f:
+        with open(basepath + file,'r', encoding = 'utf-8') as f:
             htmlfile = f.read()
             
             #re.complie 将用到的正则表达式预先编码，提高速度，模式re.S，实现跨行匹配
@@ -308,17 +308,18 @@ displaynames.columns = ['displayname','roomname','name','roomid','member']
 #@人名通过unicode中的\u2005提取
 re_unicode = re.compile(u'@(?P<atname>.*?)\u2005')
 
-msgat = total_msg.msg.str.decode('utf-8').str.extractall(re_unicode)#102397
+#msgat = total_msg.msg.str.decode('utf-8').str.extractall(re_unicode)#102397 py2
+msgat = total_msg.msg.str.extractall(re_unicode)#102397 在py3中文本总是unicode不用担心编码问题，只需要在读取的时候指明编码方式即可
 msgat.index.levels[0].name = 'msgindex'
 total_msg.index.name = 'msgindex'
 # join with index, but the index should be named first
-msgat = msgat.join(total_msg[['msgSvrId','createTime','talker']])#102397
+msgat = msgat.join(total_msg[['msgSvrId','createTime','talker','sender']])#102397
 
-msgat.atname = msgat.atname.str.encode('utf-8')
+#msgat.atname = msgat.atname.str.encode('utf-8') py3中不再需要
 msgat = msgat.merge(displaynames,left_on = ['atname','talker'],right_on = ['displayname','roomid'],how = 'left')#102397
 #只需要member和displayname的对照
-msgat = msgat[['msgSvrId','atname','createTime','talker','member']]
-msgat.columns = ['msgSvrId','atname','createTime','talker','member_x']
+msgat = msgat[['msgSvrId','atname','createTime','talker','member','sender']]
+msgat.columns = ['msgSvrId','atname','createTime','talker','member_x','sender']
 '''
 在和displaynames表匹配完后，和nicknames表的匹配可以用如下的函数进行
 分别匹配displaynam和nickname
@@ -327,11 +328,11 @@ def concatNames(atdf,nicknamedf):
     #match the displayname
     atdf = atdf.merge(nicknamedf,left_on = ['atname','talker'],right_on = ['displayname','chatroomname'],how = 'left')
     atdf.member_x[atdf.member_x.isna()] = atdf.member[atdf.member_x.isna()]
-    atdf = atdf[['msgSvrId','atname','createTime','talker','member_x']]
+    atdf = atdf[['msgSvrId','atname','createTime','talker','member_x','sender']]
     #match the nickname
     atdf = atdf.merge(nicknamedf,left_on = ['atname','talker'],right_on = ['nickname','chatroomname'],how = 'left')
     atdf.member_x[atdf.member_x.isna()] = atdf.member[atdf.member_x.isna()]
-    atdf = atdf[['msgSvrId','atname','createTime','talker','member_x']]
+    atdf = atdf[['msgSvrId','atname','createTime','talker','member_x','sender']]
     return atdf
     
 msgat = concatNames(msgat,nickname0830)
@@ -339,7 +340,8 @@ msgat = concatNames(msgat,nickname180119)
 msgat = concatNames(msgat,nickname180310)
 
 len(msgat[msgat.member_x.isna()])*1.0/len(msgat)#有53%的找不到@对应的人
-
+#如果找不到displayname对应的wechatid，则删掉
+msgat.dropna(inplace = True, subset = ['member_x'])
 nickname0830.dropna(subset = ['displayname']).pipe(lambda x: x.loc[x.displayname.str.contains('赛')])
 nickname0830.dropna(subset = ['nickname']).pipe(lambda x: x.loc[x.nickname.str.contains('赛')])
 
