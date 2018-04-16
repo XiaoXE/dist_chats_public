@@ -374,7 +374,7 @@ converExpandList = []
 tempExpandList = []
 for date in ann2['createTime'].dt.date.unique():
     #FIEXED
-    maxdate = datetime.datetime(date.year,date.month,date.day) + datetime.timedelta(days = twindow)
+    maxdate = datetime.datetime(date.year,date.month,date.day) + datetime.timedelta(days = twindow+1)
     mindate = datetime.datetime(date.year,date.month,date.day) - datetime.timedelta(days = twindow)
     #slice the msgat dataframe with bounded time period
     msgatdf = msgat[(msgat.createTime > mindate)&(msgat.createTime < maxdate)]
