@@ -257,13 +257,14 @@ def sumTfidf(tfidfList):
             else:
                 rList[term] = freq
     return(rList)
-def autherProb(row, t_scale, contextdf):
+def autherProb(row, t_scale, contextdf, w_auther):
     '''Expand the context-free info of msgi with auther context.
     
     Args:
         row(Series): One raw of msgdf.itertuples() to be expanded
         t_scale(float): The scale of normal distribution trained before
         contextdf(dataframe): The dataframe of msgs between [DATE - 1DAY,DATE + 1DAY]
+        w_auther(float): Weight for auther context.
     Returns:
         The return vector. The expand vector repretation of msgi with info from its auther context.
     '''
@@ -283,9 +284,10 @@ def autherProb(row, t_scale, contextdf):
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
-    return(sumTfidf(newTfidf))
+    #return(sumTfidf(newTfidf))
+    return({k:(w_auther*v)  for k,v in sumTfidf(newTfidf).items()})
 
-def converProb(row, t_scale, contextdf, msgat):
+def converProb(row, t_scale, contextdf, msgat, w_conver):
     '''Expand the context-free info of msgi with conversational context.
     
     Args:
@@ -294,6 +296,7 @@ def converProb(row, t_scale, contextdf, msgat):
         contextdf(dataframe): The dataframe of msgs between [DATE - 1DAY,DATE + 1DAY]
         msgat(dataframe): The dataframe of msgat between [DATE - 1DAY,DATE + 1DAY]
                         , for the reduction of repeted searching the bounded date of msgat
+        w_conver(float): weight for conversational context
     Returns:
         The return vector. The expand vector repretation of msgi with info from its conversational context.    
     '''
@@ -318,8 +321,8 @@ def converProb(row, t_scale, contextdf, msgat):
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
-    return(sumTfidf(newTfidf))    
-def tempProb(row, t_scale, contextdf):
+    return({k:(v*w_conver) for k,v in sumTfidf(newTfidf).items()})    
+def tempProb(row, t_scale, contextdf, w_temp):
     '''Expand the context-free info of msgi with temporal context.
     
     Args:
@@ -344,30 +347,40 @@ def tempProb(row, t_scale, contextdf):
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
-    return(sumTfidf(newTfidf))    
+    return({k:(v*w_temp)for k,v in sumTfidf(newTfidf).items()}) 
 def sumDicts(dict1,dict2):
     '''Sum dict1 with dict2, only 2.
     
     '''
     return({k:dict1.get(k,0) + dict2.get(k,0) for k in dict1.keys()|dict2.keys()})
-def expandedMsg(contextFree, autherContext, converContext, tempContext):
+def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contextFree):
     '''Sum the context-free msg tfidf with all context info.
     Args:
-        contextFree(Series): The tfidf Series of the raw msg
+        contextFree(List): The tfidf list of the raw msg, each element is a dict
         autherContext(List): The tfidf List of expanded auther context info.
         tempContext(List): The tfidf List of expanded temporal context info.
         converContext(List): The tfidf List of expanded conversational context info.
+        w_contextFree(float): Weights for context-free
     Returns:
         The return vector of expanded representation.
     '''
     #TODO
     rList = []
     for i in range(len(contextFree)):
-        rList.append(sumDicts(sumDicts(sumDicts(contextFree[i],autherContext[i]),converContext[i]),tempContext[i]))
+        #rList.append(sumDicts(sumDicts(sumDicts(contextFree[i],autherContext[i]),converContext[i]),tempContext[i]))
+        contextPart ={k:(v*(1-w_contextFree))for k,v in sumDicts(sumDicts(autherContext[i],converContext[i]),tempContext[i]).items()}
+        contextFreePart = {k:(v*w_contextFree) for k,v in contextFree[i].items()}
+        rList.append(sumDicts(contextFreePart, contextPart))
     return(rList)
 auther_scale = 3520
 conver_scale = 574.8
 temporal_scale = 7029.3
+w_contextFree = 0.45
+
+w_auther = 0.3
+w_conver = 0.6
+w_temp = 0.1
+#weights = {'w_contextFree':w_contextFree,'w_context':w_context,'w_auther':w_auther,'w_conver':w_conver,'w_temp':w_temp}
 #access the date property with a .dt accessor
 autherExpandList = []
 converExpandList = []
@@ -383,11 +396,23 @@ for date in ann2['createTime'].dt.date.unique():
     #TODO
     #check results    
     for row in targetdf.itertuples():
-        autherExpandList.append(autherProb(row, auther_scale, contextdf))
+        autherExpandList.append(autherProb(row, auther_scale, contextdf, w_auther))
         converExpandList.append(converProb(row, conver_scale,  contextdf, msgatdf))
         tempExpandList.append(tempProb(row, temporal_scale, contextdf))
         #break
 #ann2['autherExpand'] = autherExpandList
 ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))
-tmp = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExpandList,tempExpandList)
+ann2['extended'] = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExpandList,tempExpandList, w_contextFree)
+
+#ann2.to_csv('../records/annotation/anno2extented.csv')
+#%%
+
+#%%
+'''Compute the similarity between a given msg and existing threads
+Single pass clustering is performed.
+1.Treat the first msg as a single-message cluster T.
+2.for each remaining msg m compute for All the existing threads.
+    sim(m, T)= max sim(m, mi) mi belongs to All the existing threads.
+    
+'''
 #%%
