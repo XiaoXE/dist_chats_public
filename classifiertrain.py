@@ -11,6 +11,8 @@ run order:1
 import scipy.stats as st
 import matplotlib.pyplot as plt
 import nltk
+import math
+import timeit
 #nltk.download()
 from pyltp import SentenceSplitter
 #%%
@@ -347,7 +349,7 @@ def tempProb(row, t_scale, contextdf, w_temp):
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
-    return({k:(v*w_temp)for k,v in sumTfidf(newTfidf).items()}) 
+    return({k:(v*w_temp)for k,v in sumTfidf(newTfidf).items()})
 def sumDicts(dict1,dict2):
     '''Sum dict1 with dict2, only 2.
     
@@ -364,7 +366,6 @@ def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contex
     Returns:
         The return vector of expanded representation.
     '''
-    #TODO
     rList = []
     for i in range(len(contextFree)):
         #rList.append(sumDicts(sumDicts(sumDicts(contextFree[i],autherContext[i]),converContext[i]),tempContext[i]))
@@ -392,13 +393,11 @@ for date in ann2['createTime'].dt.date.unique():
     #slice the msgat dataframe with bounded time period
     msgatdf = msgat[(msgat.createTime > mindate)&(msgat.createTime < maxdate)]
     contextdf = ann2[(ann2.createTime > mindate)&(ann2.createTime < maxdate) ]
-    targetdf = ann2[ann2.createTime.dt.date == date]
-    #TODO
-    #check results    
+    targetdf = ann2[ann2.createTime.dt.date == date] 
     for row in targetdf.itertuples():
         autherExpandList.append(autherProb(row, auther_scale, contextdf, w_auther))
-        converExpandList.append(converProb(row, conver_scale,  contextdf, msgatdf))
-        tempExpandList.append(tempProb(row, temporal_scale, contextdf))
+        converExpandList.append(converProb(row, conver_scale, contextdf, msgatdf, w_conver))
+        tempExpandList.append(tempProb(row, temporal_scale, contextdf, w_temp))
         #break
 #ann2['autherExpand'] = autherExpandList
 ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))
@@ -409,10 +408,136 @@ ann2['extended'] = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExp
 
 #%%
 '''Compute the similarity between a given msg and existing threads
-Single pass clustering is performed.
+Single pass clustering is performed.(reference about single pass tech: 
+    http://facweb.cs.depaul.edu/mobasher/classes/csc575/assignments/single-pass.html)
 1.Treat the first msg as a single-message cluster T.
 2.for each remaining msg m compute for All the existing threads.
     sim(m, T)= max sim(m, mi) mi belongs to All the existing threads.
-    
+    sim(m, mi) = cosin similarity between these two msgs.
 '''
+def dictNorm(dict1):
+    '''Compute the norm of a dictionary just like a vector
+    Args:
+        dict1(dict): the square of sum of each value in this dict.
+    Returns:
+        The return float.
+    '''    
+    return(sum([v*v for v in dict1.values()]))
+def dotProduct(dict1,dict2):
+    '''Compute the dot product of two dicts, like vectors
+    Args:
+        dict1, dict2(dicts): two tfidf dicts.
+    Returns:
+        The return float.
+    '''
+    return(sum([dict1[k]*dict2[k] for k in dict1.keys()&dict2.keys()]))
+
+def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
+    '''Pairwise similarity function.
+    
+    1. Turn the date into date counts.
+    2. The composation of Theadid:
+        Part1: Date count * 10e4
+        Part2: increamental thread id counts.(suppose this count will not exceed 10e3)
+        Theadid = Part1 + Part2
+    3. Only compute in the range of [Date - 1, Date]
+    Args:
+        msgdf(dataframe): The dataframe of msg log
+        targetmsgid(String): The target unique msg id to be compared.
+        msgdate(int): The date count from the beginning date.
+        threadDict(dict): key= thread id, value = List of msgid.
+        threshold(float): if the max similarity is under threshold, start a new cluster containing only this msg
+    Returns:
+        The updated threadDict.
+    '''
+    if(len(threadDict) == 0):
+        threadid = 1 + 10000*msgdate
+        threadDict[threadid] = [targetmsgid]
+    else:
+        max_similarity_thread = 0
+        max_similarity = 0
+        #find the max similarity and the corresponding thread over all threads.
+        for thread, msgids in threadDict.items():
+            #Notice, the threadDict may be NULL!
+            threaddate = thread // 10000
+            if(threaddate < msgdate - 1): continue
+            for msgid in msgids:
+                targetmsg = msgdf[msgdf.msgSvrId == targetmsgid]['extended'].item()#get the exact dict rather than dict and object type
+                comparedmsg = msgdf[msgdf.msgSvrId == msgid]['extended'].item()
+                cosine = dotProduct(targetmsg,comparedmsg)/math.sqrt(dictNorm(targetmsg)*dictNorm(comparedmsg))
+                if (cosine > max_similarity):
+                    max_similarity = cosine
+                    max_similarity_thread = thread
+                     
+        if(max_similarity > threshold):
+            #print(max_similarity)
+            threadDict[max_similarity_thread].append(targetmsgid)
+        else:
+            #CAUTION maybe wrong
+            #create a new thread
+            if(threaddate == msgdate):
+                threadDict[max(threadDict.keys())%10000 + 1 + msgdate*10000] = [targetmsgid]
+            if(threaddate < msgdate):
+                #if this a new date and new thread, then reset the thread id to 1.
+                threadDict[1 + msgdate*10000] = [targetmsgid]
+    return(threadDict)    
+#timeit.timeit(number = 1,stmt = "")
+threadDict = {}       
+begin_date = min(ann2['createTime'])
+threshold = 0.7
+# Use count to control how many msgs to distengle thread.
+count = 1
+for row in ann2.itertuples():
+    msgid = row[2]
+    msgdate = row[4]
+    msgdate = (msgdate - begin_date).days + 1
+    threadDict = similarity(ann2, msgid, msgdate, threadDict, threshold)
+    #count += 1
+    #if(count >50): break
+#for k,v in threadDict.items():
+#    print(k, len(v))
+#TODO
+# compare the performance between for loop map() and list comprehension    
+#%%
+    
+#%%
+'''Choose the F value to be the object and try to train the optimal model.
+1. Build the F value.
+2. Adjust the parameters to maximize F value.
+''' 
+def recall(ti,tj):
+    '''The recall between the real thread i and the detected thread j.
+    
+    Recall(i,j) = nij / ni
+    where nij is the number of msgs of the real thread i in the detected thread j.
+    ni is the number of msgs in the real thread i.
+
+    Args:
+        ti(int): The real thread number.
+        tj(int): The detected thread number.
+    Return:
+        The return float number.    
+    '''
+    
+    pass
+def precision(ti,tj):
+    '''Precision(i,j) = nij / nj
+    where nj is the number of msgs in the detected thread j.
+    
+    '''
+    pass
+
+def fvalue():
+    ''' F(i,j) = 2*Precision*Recall /(Precision + Recall)
+    is the F measure of detected thread j and the real thread i.
+    The whole F is a weighted sum over all threads as:
+        ...
+    
+    '''
+    pass
+
+realThreadDict = {}
+for thread in ann2['thread'].unique():
+    msgs = ann2[ann2['thread'] == thread]['msgSvrId'].tolist()
+    realThreadDict[thread] = msgs
 #%%
