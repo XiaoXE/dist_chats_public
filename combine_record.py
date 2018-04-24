@@ -8,7 +8,7 @@ run order 0.0
 output: a combined wechat group chattting log
 
 """
-#%%
+#%% ddd
 import numpy as np
 import pandas as pd
 import os
@@ -76,7 +76,7 @@ def parseDisplayname(dir):
                     'displayname':nicknames
                     })
             displaydf = displaydf.append(tmpdf,ignore_index = True)
-    return(displaydf)
+    return displaydf
 #这里得到的昵称是群昵称，也就是聊天的时候显示的名字
 #而且，这里的个数只会比chatroom的行数多吧。。。
 #这里假设没有人退群
@@ -108,13 +108,13 @@ chatroom0830 = chatroom0830[~chatroom0830.chatroomname.isin(remove_room)]#现在
 
 #%%
 def match_nickname(chatroomdf):
-    '''
-    to get nicknames of members in a group, but the question is when people chat in group, the name displayed in 
+    """
+    to get nicknames of members in a group, but the question is when people chat in group, the name displayed in
     group chatting is not always the nickname but sometimes the group displayname if they set this name, which can split from the roomdata column.
     But! this function is still usable for those chatroom without fault.
-    
+
     In conclusion, this function get nicknames in the right chatroom
-    '''
+    """
     matched_df = pd.DataFrame(columns = ['chatroomname','member','nickname'])
     for row in chatroomdf.itertuples():
         chatroomname = row[1]
@@ -130,13 +130,13 @@ def match_nickname(chatroomdf):
                         'nickname':displaynamelist[i]                    
                         },index = [0])
                 matched_df = matched_df.append(tmpdf,ignore_index=True)
-    return(matched_df)
+    return matched_df
     
 def match_groupdisplayname(chatroomdf,nicknamedf):
-    '''
-    to match the member wechat id and group display name in roomdata, which can 
+    """
+    to match the member wechat id and group display name in roomdata, which can
     not be derived from other columns in chatroom dataframe
-    '''
+    """
     matched_df = pd.DataFrame(columns = ['chatroomname','member','displayname'])
     for row in chatroomdf.itertuples():
         chatroomname = row[1]        
@@ -169,7 +169,7 @@ def match_groupdisplayname(chatroomdf,nicknamedf):
                 }),ignore_index = True)
     #将得到的群昵称和微信昵称进行外链接
     matched_df = matched_df.merge(nicknamedf,on = ['chatroomname','member'],how = 'outer')
-    return(matched_df)
+    return matched_df
         
 
 nickname0830 = match_nickname(chatroom0830)

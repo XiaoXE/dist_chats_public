@@ -67,12 +67,13 @@ for row in ann1.itertuples():
     autherContext = ann1[(ann1.sender == sender)&(ann1.msgSvrId != msgid)]
     timediff = autherContext[autherContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()#单位秒
-    timediff = [x.total_seconds() for x in timediff]
+    timediff = [x.total_seconds()/60 for x in timediff]
     totalTimediff.extend(timediff)
 
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
-st.norm.fit(totalTimediff)#loc = 0 scale = 3520
+plt.show()
+st.norm.fit(totalTimediff)#loc = 0 scale = 58.7
 #%%
 #%%
 '''
@@ -94,14 +95,15 @@ for row in ann1.itertuples():
     converContext = ann1[ann1.sender.isin(mentionNames)&(ann1.createTime > mindate)&(ann1.createTime < maxdate)]
     timediff = converContext[converContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()
-    totalTimediff.extend([x.total_seconds() for x in timediff])
+    totalTimediff.extend([x.total_seconds()/60 for x in timediff])
     
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
+plt.show()
 #减去均值，使其为0
 avg = sum(totalTimediff) / float(len(totalTimediff))
 totalTimediff = [x - avg for x in totalTimediff]
-st.norm.fit(totalTimediff)#loc = 0 scale = 574.8
+st.norm.fit(totalTimediff)#loc = 0 scale = 9.6
 #%%
 
 #%%
@@ -121,14 +123,14 @@ for row in ann1.itertuples():
     temporalContext = ann1[(ann1.createTime > mindate)&(ann1.createTime < maxdate)&(ann1.msgSvrId != msgid)]
     timediff = temporalContext[temporalContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()
-    totalTimediff.extend([x.total_seconds() for x in timediff])
+    totalTimediff.extend([x.total_seconds()/60 for x in timediff])
     
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
 #减去均值，使其为0
 avg = sum(totalTimediff) / float(len(totalTimediff))
 totalTimediff = [x - avg for x in totalTimediff]
-st.norm.fit(totalTimediff)#loc = 0 scale = 7029.3
+st.norm.fit(totalTimediff)#loc = 0 scale = 117.2
 #%%
 
 #%%
@@ -215,6 +217,7 @@ for doc in corpus_tfidf:
     print(doc)
 '''
 ann2['tfidf'] = list(corpus_tfidf)
+ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))# to dict
 #%%
 
 #%%
@@ -235,15 +238,13 @@ def probMultiTfidf(probArray, tfidfList):
         tfidfList(List): the tfidfList of msg context
     Returns:
         The return tuple
-    '''    
-    rList = []
-    for i in range(len(probArray)):
-        r2List = []
-        for term, freq in tfidfList[i]:
-            r2List.append((term, freq*probArray[i]))
-        rList.append(r2List)
-    return(rList)
-    
+    '''
+    # alternative
+    return ([{k: v for k, v in zip(tfidfList[i].keys(), probArray[i] * np.array(list(tfidfList[i].values())))} for i in
+             range(len(probArray))])
+
+
+
 def sumTfidf(tfidfList):
     '''Sum the new computed tfidf
     Args:
@@ -253,11 +254,7 @@ def sumTfidf(tfidfList):
     '''
     rList = {}
     for tfidf in tfidfList:
-        for term, freq in tfidf:
-            if(term in rList):#has_key was removed in Python3
-                rList[term] = rList[term] + freq
-            else:
-                rList[term] = freq
+        rList = sumDicts(tfidf, rList)
     return(rList)
 def autherProb(row, t_scale, contextdf, w_auther):
     '''Expand the context-free info of msgi with auther context.
@@ -281,7 +278,7 @@ def autherProb(row, t_scale, contextdf, w_auther):
     autherContext = contextdf[(contextdf.sender == sender)&(contextdf.msgSvrId != msgid)]
     timediff = autherContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds() for x in timediff]
+    timediff = [x.total_seconds()/3600 for x in timediff]
     tfidfList = autherContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
@@ -318,7 +315,7 @@ def converProb(row, t_scale, contextdf, msgat, w_conver):
     
     timediff = converContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds() for x in timediff]
+    timediff = [x.total_seconds()/3600 for x in timediff]
     tfidfList = converContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
@@ -344,7 +341,7 @@ def tempProb(row, t_scale, contextdf, w_temp):
     tempContext = contextdf[(contextdf.msgSvrId != msgid)]
     timediff = tempContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds() for x in timediff]
+    timediff = [x.total_seconds()/3600 for x in timediff]
     tfidfList = tempContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
@@ -352,9 +349,8 @@ def tempProb(row, t_scale, contextdf, w_temp):
     return({k:(v*w_temp)for k,v in sumTfidf(newTfidf).items()})
 def sumDicts(dict1,dict2):
     '''Sum dict1 with dict2, only 2.
-    
     '''
-    return({k:dict1.get(k,0) + dict2.get(k,0) for k in dict1.keys()|dict2.keys()})
+    return {k: dict1.get(k, 0) + dict2.get(k, 0) for k in dict1.keys() | dict2.keys()}
 def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contextFree):
     '''Sum the context-free msg tfidf with all context info.
     Args:
@@ -366,16 +362,24 @@ def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contex
     Returns:
         The return vector of expanded representation.
     '''
+    '''
     rList = []
     for i in range(len(contextFree)):
         #rList.append(sumDicts(sumDicts(sumDicts(contextFree[i],autherContext[i]),converContext[i]),tempContext[i]))
         contextPart ={k:(v*(1-w_contextFree))for k,v in sumDicts(sumDicts(autherContext[i],converContext[i]),tempContext[i]).items()}
         contextFreePart = {k:(v*w_contextFree) for k,v in contextFree[i].items()}
-        rList.append(sumDicts(contextFreePart, contextPart))
+        rList.append(sumDicts(contextFreePart, contextPart))# can be optimized
+        
     return(rList)
-auther_scale = 3520
-conver_scale = 574.8
-temporal_scale = 7029.3
+    '''
+
+    #alternative1 : to dict comprehension
+    return [sumDicts({k:(v*(1-w_contextFree))for k,v in sumDicts(sumDicts(autherContext[i],converContext[i]),tempContext[i]).items()}, {k:(v*w_contextFree) for k,v in contextFree[i].items()}) for i in range(len(contextFree))]
+    #alternative2 : to numpy array? no!
+
+auther_scale = 58.7
+conver_scale = 9.6
+temporal_scale = 117
 w_contextFree = 0.45
 
 w_auther = 0.3
@@ -399,11 +403,7 @@ for date in ann2['createTime'].dt.date.unique():
         converExpandList.append(converProb(row, conver_scale, contextdf, msgatdf, w_conver))
         tempExpandList.append(tempProb(row, temporal_scale, contextdf, w_temp))
         #break
-#ann2['autherExpand'] = autherExpandList
-ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))
 ann2['extended'] = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExpandList,tempExpandList, w_contextFree)
-
-#ann2.to_csv('../records/annotation/anno2extented.csv')
 #%%
 
 #%%
@@ -430,7 +430,7 @@ def dotProduct(dict1,dict2):
     Returns:
         The return float.
     '''
-    return(sum([dict1[k]*dict2[k] for k in dict1.keys()&dict2.keys()]))
+    return sum([dict1[k] * dict2[k] for k in dict1.keys() & dict2.keys()])
 
 def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
     '''Pairwise similarity function.
@@ -450,7 +450,7 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
     Returns:
         The updated threadDict.
     '''
-    if(len(threadDict) == 0):
+    if len(threadDict) == 0:
         threadid = 1 + 10000*msgdate
         threadDict[threadid] = [targetmsgid]
     else:
@@ -460,7 +460,7 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
         for thread, msgids in threadDict.items():
             #Notice, the threadDict may be NULL!
             threaddate = thread // 10000
-            if(threaddate < msgdate - 1): continue
+            if threaddate < msgdate - 1: continue
             for msgid in msgids:
                 targetmsg = msgdf[msgdf.msgSvrId == targetmsgid]['extended'].item()#get the exact dict rather than dict and object type
                 comparedmsg = msgdf[msgdf.msgSvrId == msgid]['extended'].item()
@@ -469,24 +469,24 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
                     max_similarity = cosine
                     max_similarity_thread = thread
                      
-        if(max_similarity > threshold):
+        if max_similarity > threshold:
             #print(max_similarity)
             threadDict[max_similarity_thread].append(targetmsgid)
         else:
             #CAUTION maybe wrong
             #create a new thread
-            if(threaddate == msgdate):
+            if threaddate == msgdate:
                 threadDict[max(threadDict.keys())%10000 + 1 + msgdate*10000] = [targetmsgid]
-            if(threaddate < msgdate):
+            if threaddate < msgdate:
                 #if this a new date and new thread, then reset the thread id to 1.
                 threadDict[1 + msgdate*10000] = [targetmsgid]
-    return(threadDict)    
-#timeit.timeit(number = 1,stmt = "")
+    return threadDict
+
 threadDict = {}       
 begin_date = min(ann2['createTime'])
 threshold = 0.7
 # Use count to control how many msgs to distengle thread.
-count = 1
+#count = 1
 for row in ann2.itertuples():
     msgid = row[2]
     msgdate = row[4]
@@ -496,8 +496,10 @@ for row in ann2.itertuples():
     #if(count >50): break
 #for k,v in threadDict.items():
 #    print(k, len(v))
-#TODO
-# compare the performance between for loop map() and list comprehension    
+
+# compare the performance between for loop map() and list comprehension
+# map is not suitable for this iteration.
+# and list comprehension is not suitable too.
 #%%
     
 #%%
@@ -506,38 +508,127 @@ for row in ann2.itertuples():
 2. Adjust the parameters to maximize F value.
 ''' 
 def recall(ti,tj):
-    '''The recall between the real thread i and the detected thread j.
-    
+    """The recall between the real thread i and the detected thread j.
+
     Recall(i,j) = nij / ni
     where nij is the number of msgs of the real thread i in the detected thread j.
     ni is the number of msgs in the real thread i.
 
     Args:
-        ti(int): The real thread number.
-        tj(int): The detected thread number.
+        ti(int): The real thread number, also the key in the realThreadDict.
+        tj(int): The detected thread number, also the key in the threadDict.
     Return:
-        The return float number.    
-    '''
-    
-    pass
+        The return float number.
+    """
+    realMsg = realThreadDict[ti]
+    detectMsg = threadDict[tj]
+    nij = len([real for real in realMsg if real in detectMsg])
+    ni = len(realMsg)
+    # check the result with jupyter console
+    # good result
+    return nij / ni
 def precision(ti,tj):
-    '''Precision(i,j) = nij / nj
+    """Precision(i,j) = nij / nj
     where nj is the number of msgs in the detected thread j.
-    
-    '''
-    pass
 
-def fvalue():
-    ''' F(i,j) = 2*Precision*Recall /(Precision + Recall)
+    Args:
+        ti(int): The real thread number, also the key in the realThreadDict.
+        tj(int): The detected thread number, also the key in the threadDict.
+    Return:
+        The return float number.
+    """
+    realMsg = realThreadDict[ti]
+    detectMsg = threadDict[tj]
+    nij = len([real for real in realMsg if real in detectMsg])
+    nj = len(detectMsg)
+    # check the result with jupyter console
+    # good result
+    return nij / nj
+
+def pairf(ti,tj):
+    """ F(i,j) = 2*Precision*Recall /(Precision + Recall)
     is the F measure of detected thread j and the real thread i.
-    The whole F is a weighted sum over all threads as:
-        ...
-    
-    '''
-    pass
+    """
+    prevalue = precision(ti,tj)
+    revalue = recall(ti,tj)
+    #print(prevalue, revalue)
+    if (prevalue == 0)|(revalue == 0):
+        return 0
+    else:
+        return 2 * prevalue * revalue / (prevalue + revalue)
+
+def fvalue(realThreadDict, threadDict):
+    """The whole F measure of the detection result in a stream
+is defined as a weighted sum over all threads as follow.
+    Args:
+        realThreadDict(dict): The dict of ground true threads of msgs. Key is thread id and value is msgid list.
+        threadDict(dict): The dict of detected thread.
+    """
+    max_pairf, wholef = 0, 0
+    len_msg = len(ann2)
+    for realThread in realThreadDict:
+        for detectThread in threadDict:
+            value_pairf = pairf(realThread, detectThread)
+            if value_pairf > max_pairf: max_pairf = value_pairf
+        wholef = wholef + len(realThreadDict[realThread])*value_pairf
+
+    return wholef/len_msg
 
 realThreadDict = {}
 for thread in ann2['thread'].unique():
     msgs = ann2[ann2['thread'] == thread]['msgSvrId'].tolist()
     realThreadDict[thread] = msgs
-#%%
+
+fvalue(realThreadDict, threadDict)
+plt.bar(realThreadDict.keys(),[len(value) for value in realThreadDict.values()] )
+plt.show()
+plt.bar(range(len(threadDict)),[len(value) for value in threadDict.values()] )
+plt.show()
+#%% Tuning Function
+def tuning(w_contextFree=0.45, w_auther=0.3, w_conver=0.6, w_temp=0.1, threshold=0.7):
+    """Tuning parameters.
+    1. Compute the extended msg tfidf with all the parameters.
+    2. Cluster msgs into threads.
+    3. Compute the F value.
+
+    Args:
+        w_*, threshold(float): all the weights and threshold to be tuning.
+
+    """
+    # access the date property with a .dt accessor
+    autherExpandList = []
+    converExpandList = []
+    tempExpandList = []
+    for date in ann2['createTime'].dt.date.unique():
+        # FIEXED
+        maxdate = datetime.datetime(date.year, date.month, date.day) + datetime.timedelta(days=twindow + 1)
+        mindate = datetime.datetime(date.year, date.month, date.day) - datetime.timedelta(days=twindow)
+        # slice the msgat dataframe with bounded time period
+        msgatdf = msgat[(msgat.createTime > mindate) & (msgat.createTime < maxdate)]
+        contextdf = ann2[(ann2.createTime > mindate) & (ann2.createTime < maxdate)]
+        targetdf = ann2[ann2.createTime.dt.date == date]
+        for row in targetdf.itertuples():
+            autherExpandList.append(autherProb(row, auther_scale, contextdf, w_auther))
+            converExpandList.append(converProb(row, conver_scale, contextdf, msgatdf, w_conver))
+            tempExpandList.append(tempProb(row, temporal_scale, contextdf, w_temp))
+
+    # ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))
+    # ann2['extended'] = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExpandList,tempExpandList, w_contextFree)
+    # extendedtfidf is a list of dicts.
+    extendedtfidf = expandedMsg(ann2['tfidf'].tolist(), autherExpandList, converExpandList, tempExpandList,
+                                w_contextFree)
+
+    # Then compute the similarity and get the thread.
+    threadDict = {}
+    begin_date = min(ann2['createTime'])
+    for row in ann2.itertuples():
+        msgid = row[2]
+        msgdate = row[4]
+        msgdate = (msgdate - begin_date).days + 1
+        threadDict = similarity(ann2, msgid, msgdate, threadDict, threshold)
+
+    # Then compute the F value.
+    return fvalue(realThreadDict, threadDict)
+
+#TODO
+#BASED ON DIFF_REAL_DETECTED_THREAD, FIX SIMILARITY FUNCTION, FIND OUT THE REASON WHY SO MANY TINY THREADS.
