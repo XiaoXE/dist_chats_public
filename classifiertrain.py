@@ -15,7 +15,6 @@ import math
 import timeit
 #nltk.download()
 from pyltp import SentenceSplitter
-#%%
 
 #%%
 '''
@@ -45,9 +44,12 @@ ann2.dropna(subset = ['msg','thread'],how = 'any', inplace = True)
 
 ann1 = ann1[ann1.thread > -2]
 ann2 = ann2[ann2.thread > -2]
+
+ann2['msgSvrId'] = list(range(len(ann2)))
 #set the time window 群组讨论的当天和前后半天
 twindow = 0.5#这个应该用在全局的totalmsg表上，每次处理响应窗口的数据
-#%%
+divideN = 1500
+
 #%%
 '''
 the author context of a message m, denoted by CA(m), is the set of other messages
@@ -67,14 +69,15 @@ for row in ann1.itertuples():
     autherContext = ann1[(ann1.sender == sender)&(ann1.msgSvrId != msgid)]
     timediff = autherContext[autherContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()#单位秒
-    timediff = [x.total_seconds()/60 for x in timediff]
+    timediff = [x.total_seconds()/divideN for x in timediff]
     totalTimediff.extend(timediff)
 
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
 plt.show()
-st.norm.fit(totalTimediff)#loc = 0 scale = 58.7
-#%%
+normfit = st.norm.fit(totalTimediff)#loc = 0 scale = 2.347
+auther_scale = normfit[1]
+
 #%%
 '''
 conversational context 
@@ -95,7 +98,7 @@ for row in ann1.itertuples():
     converContext = ann1[ann1.sender.isin(mentionNames)&(ann1.createTime > mindate)&(ann1.createTime < maxdate)]
     timediff = converContext[converContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()
-    totalTimediff.extend([x.total_seconds()/60 for x in timediff])
+    totalTimediff.extend([x.total_seconds()/divideN for x in timediff])
     
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
@@ -103,13 +106,12 @@ plt.show()
 #减去均值，使其为0
 avg = sum(totalTimediff) / float(len(totalTimediff))
 totalTimediff = [x - avg for x in totalTimediff]
-st.norm.fit(totalTimediff)#loc = 0 scale = 9.6
-#%%
+normfit = st.norm.fit(totalTimediff)#loc = 0 scale = 0.383
+conver_scale = normfit[1]
 
 #%%
 '''
 temporal context
-
 '''
 totalTimediff = []
 for row in ann1.itertuples():
@@ -123,15 +125,16 @@ for row in ann1.itertuples():
     temporalContext = ann1[(ann1.createTime > mindate)&(ann1.createTime < maxdate)&(ann1.msgSvrId != msgid)]
     timediff = temporalContext[temporalContext.thread == threadid]['createTime'] - msgdate
     timediff = timediff.tolist()
-    totalTimediff.extend([x.total_seconds()/60 for x in timediff])
+    totalTimediff.extend([x.total_seconds()/divideN for x in timediff])
     
 #估计这个timediff的参数
 plt.hist(totalTimediff, normed = True)
+plt.show()
 #减去均值，使其为0
 avg = sum(totalTimediff) / float(len(totalTimediff))
 totalTimediff = [x - avg for x in totalTimediff]
-st.norm.fit(totalTimediff)#loc = 0 scale = 117.2
-#%%
+normfit = st.norm.fit(totalTimediff)#loc = 0 scale = 4.686
+temporal_scale = normfit[1]
 
 #%%
 '''
@@ -184,7 +187,6 @@ with open(r'stopwords.tab', encoding = 'utf-8') as f_stop:
      
 ann2['splitwords'] = [[word for word in wordslist if word not in stopwords] for wordslist in ann2['splitwords'].tolist()]
 '''
-#%%
 
 #%%
 '''
@@ -216,9 +218,11 @@ corpus_tfidf =  tfidf[corpus]
 for doc in corpus_tfidf:
     print(doc)
 '''
-ann2['tfidf'] = list(corpus_tfidf)
+#use BOW instead of tfidf
+#ann2['tfidf'] = list(corpus_tfidf)
+ann2['tfidf'] = corpus
 ann2['tfidf'] = list(map(lambda x: dict(x), ann2['tfidf']))# to dict
-#%%
+
 
 #%%
 '''
@@ -232,13 +236,13 @@ HOW TO EXPAND: FOR EACH MESSAGE i BUILD THE FOLLOWING FUNCTIONS
     
 '''
 def probMultiTfidf(probArray, tfidfList):
-    '''Multiply the context tfidf with probability in the same thread.
+    """Multiply the context tfidf with probability in the same thread.
     Args:
         probArray(Array): probability in the same thread of msg context
         tfidfList(List): the tfidfList of msg context
     Returns:
         The return tuple
-    '''
+    """
     # alternative
     return ([{k: v for k, v in zip(tfidfList[i].keys(), probArray[i] * np.array(list(tfidfList[i].values())))} for i in
              range(len(probArray))])
@@ -246,19 +250,19 @@ def probMultiTfidf(probArray, tfidfList):
 
 
 def sumTfidf(tfidfList):
-    '''Sum the new computed tfidf
+    """Sum the new computed tfidf
     Args:
         tfidfList: A list of tfidf
     Return:
         the return list: expanded tfidf dict
-    '''
+    """
     rList = {}
     for tfidf in tfidfList:
         rList = sumDicts(tfidf, rList)
     return(rList)
 def autherProb(row, t_scale, contextdf, w_auther):
-    '''Expand the context-free info of msgi with auther context.
-    
+    """Expand the context-free info of msgi with auther context.
+
     Args:
         row(Series): One raw of msgdf.itertuples() to be expanded
         t_scale(float): The scale of normal distribution trained before
@@ -266,7 +270,7 @@ def autherProb(row, t_scale, contextdf, w_auther):
         w_auther(float): Weight for auther context.
     Returns:
         The return vector. The expand vector repretation of msgi with info from its auther context.
-    '''
+    """
     msgid = row[2]
     sender = row[6]
     msgdate = row[4]
@@ -278,7 +282,7 @@ def autherProb(row, t_scale, contextdf, w_auther):
     autherContext = contextdf[(contextdf.sender == sender)&(contextdf.msgSvrId != msgid)]
     timediff = autherContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds()/3600 for x in timediff]
+    timediff = [x.total_seconds()/divideN for x in timediff]
     tfidfList = autherContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
@@ -287,8 +291,8 @@ def autherProb(row, t_scale, contextdf, w_auther):
     return({k:(w_auther*v)  for k,v in sumTfidf(newTfidf).items()})
 
 def converProb(row, t_scale, contextdf, msgat, w_conver):
-    '''Expand the context-free info of msgi with conversational context.
-    
+    """Expand the context-free info of msgi with conversational context.
+
     Args:
         row(Series): One raw of msgdf.itertuples() to be expanded
         t_scale(float): The scale of normal distribution trained before
@@ -297,8 +301,8 @@ def converProb(row, t_scale, contextdf, msgat, w_conver):
                         , for the reduction of repeted searching the bounded date of msgat
         w_conver(float): weight for conversational context
     Returns:
-        The return vector. The expand vector repretation of msgi with info from its conversational context.    
-    '''
+        The return vector. The expand vector repretation of msgi with info from its conversational context.
+    """
     msgid = row[2]
     sender = row[6]
     msgdate = row[4]
@@ -315,24 +319,24 @@ def converProb(row, t_scale, contextdf, msgat, w_conver):
     
     timediff = converContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds()/3600 for x in timediff]
+    timediff = [x.total_seconds()/divideN for x in timediff]
     tfidfList = converContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
     return({k:(v*w_conver) for k,v in sumTfidf(newTfidf).items()})    
 def tempProb(row, t_scale, contextdf, w_temp):
-    '''Expand the context-free info of msgi with temporal context.
-    
+    """Expand the context-free info of msgi with temporal context.
+
     Args:
         row(Series): One raw of msgdf.itertuples() to be expanded
         t_scale(float): The scale of normal distribution trained before
         contextdf(dataframe): The dataframe of msgs between [DATE - 1DAY,DATE + 1DAY]
 
     Returns:
-        The return vector. The expand vector repretation of msgi with info from its temporal context. 
-    
-    '''
+        The return vector. The expand vector repretation of msgi with info from its temporal context.
+
+    """
     msgid = row[2]
     #sender = row[6]
     msgdate = row[4]
@@ -341,18 +345,18 @@ def tempProb(row, t_scale, contextdf, w_temp):
     tempContext = contextdf[(contextdf.msgSvrId != msgid)]
     timediff = tempContext['createTime'] - msgdate
     timediff = timediff.tolist()#in seconds
-    timediff = [x.total_seconds()/3600 for x in timediff]
+    timediff = [x.total_seconds()/divideN for x in timediff]
     tfidfList = tempContext['tfidf'].tolist()
     probArray = st.norm.pdf(timediff, scale = t_scale)
     newTfidf = probMultiTfidf(probArray,tfidfList)
 
     return({k:(v*w_temp)for k,v in sumTfidf(newTfidf).items()})
 def sumDicts(dict1,dict2):
-    '''Sum dict1 with dict2, only 2.
-    '''
+    """Sum dict1 with dict2, only 2.
+    """
     return {k: dict1.get(k, 0) + dict2.get(k, 0) for k in dict1.keys() | dict2.keys()}
 def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contextFree):
-    '''Sum the context-free msg tfidf with all context info.
+    """Sum the context-free msg tfidf with all context info.
     Args:
         contextFree(List): The tfidf list of the raw msg, each element is a dict
         autherContext(List): The tfidf List of expanded auther context info.
@@ -361,7 +365,7 @@ def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contex
         w_contextFree(float): Weights for context-free
     Returns:
         The return vector of expanded representation.
-    '''
+    """
     '''
     rList = []
     for i in range(len(contextFree)):
@@ -377,14 +381,10 @@ def expandedMsg(contextFree, autherContext, converContext, tempContext, w_contex
     return [sumDicts({k:(v*(1-w_contextFree))for k,v in sumDicts(sumDicts(autherContext[i],converContext[i]),tempContext[i]).items()}, {k:(v*w_contextFree) for k,v in contextFree[i].items()}) for i in range(len(contextFree))]
     #alternative2 : to numpy array? no!
 
-auther_scale = 58.7
-conver_scale = 9.6
-temporal_scale = 117
-w_contextFree = 0.45
-
-w_auther = 0.3
-w_conver = 0.6
-w_temp = 0.1
+w_contextFree = 0.25#0.45
+w_auther = 0.3#0.15
+w_conver = 0.6#0.8
+w_temp = 0.1#0.05
 #weights = {'w_contextFree':w_contextFree,'w_context':w_context,'w_auther':w_auther,'w_conver':w_conver,'w_temp':w_temp}
 #access the date property with a .dt accessor
 autherExpandList = []
@@ -404,7 +404,7 @@ for date in ann2['createTime'].dt.date.unique():
         tempExpandList.append(tempProb(row, temporal_scale, contextdf, w_temp))
         #break
 ann2['extended'] = expandedMsg(ann2['tfidf'].tolist(),autherExpandList,converExpandList,tempExpandList, w_contextFree)
-#%%
+
 
 #%%
 '''Compute the similarity between a given msg and existing threads
@@ -416,25 +416,25 @@ Single pass clustering is performed.(reference about single pass tech:
     sim(m, mi) = cosin similarity between these two msgs.
 '''
 def dictNorm(dict1):
-    '''Compute the norm of a dictionary just like a vector
+    """Compute the norm of a dictionary just like a vector
     Args:
         dict1(dict): the square of sum of each value in this dict.
     Returns:
         The return float.
-    '''    
+    """
     return(sum([v*v for v in dict1.values()]))
 def dotProduct(dict1,dict2):
-    '''Compute the dot product of two dicts, like vectors
+    """Compute the dot product of two dicts, like vectors
     Args:
         dict1, dict2(dicts): two tfidf dicts.
     Returns:
         The return float.
-    '''
+    """
     return sum([dict1[k] * dict2[k] for k in dict1.keys() & dict2.keys()])
 
 def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
-    '''Pairwise similarity function.
-    
+    """Pairwise similarity function.
+
     1. Turn the date into date counts.
     2. The composation of Theadid:
         Part1: Date count * 10e4
@@ -449,7 +449,7 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
         threshold(float): if the max similarity is under threshold, start a new cluster containing only this msg
     Returns:
         The updated threadDict.
-    '''
+    """
     if len(threadDict) == 0:
         threadid = 1 + 10000*msgdate
         threadDict[threadid] = [targetmsgid]
@@ -475,6 +475,7 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
         else:
             #CAUTION maybe wrong
             #create a new thread
+            print('new thread!',max_similarity)
             if threaddate == msgdate:
                 threadDict[max(threadDict.keys())%10000 + 1 + msgdate*10000] = [targetmsgid]
             if threaddate < msgdate:
@@ -484,23 +485,24 @@ def similarity(msgdf, targetmsgid, msgdate, threadDict, threshold):
 
 threadDict = {}       
 begin_date = min(ann2['createTime'])
-threshold = 0.7
+threshold = 0.6#0.7
 # Use count to control how many msgs to distengle thread.
-#count = 1
+count = 1
 for row in ann2.itertuples():
     msgid = row[2]
     msgdate = row[4]
     msgdate = (msgdate - begin_date).days + 1
     threadDict = similarity(ann2, msgid, msgdate, threadDict, threshold)
-    #count += 1
-    #if(count >50): break
+    count += 1
+    #debug
+    #if count >2: break
 #for k,v in threadDict.items():
 #    print(k, len(v))
 
 # compare the performance between for loop map() and list comprehension
 # map is not suitable for this iteration.
 # and list comprehension is not suitable too.
-#%%
+
     
 #%%
 '''Choose the F value to be the object and try to train the optimal model.
@@ -567,10 +569,11 @@ is defined as a weighted sum over all threads as follow.
     max_pairf, wholef = 0, 0
     len_msg = len(ann2)
     for realThread in realThreadDict:
+        max_pairf = 0
         for detectThread in threadDict:
             value_pairf = pairf(realThread, detectThread)
             if value_pairf > max_pairf: max_pairf = value_pairf
-        wholef = wholef + len(realThreadDict[realThread])*value_pairf
+        wholef = wholef + len(realThreadDict[realThread])*max_pairf
 
     return wholef/len_msg
 
