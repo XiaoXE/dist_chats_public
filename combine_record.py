@@ -344,7 +344,8 @@ len(msgat[msgat.member_x.isna()])*1.0/len(msgat)#有53%的找不到@对应的人
 msgat.dropna(inplace = True, subset = ['member_x'])
 nickname0830.dropna(subset = ['displayname']).pipe(lambda x: x.loc[x.displayname.str.contains('赛')])
 nickname0830.dropna(subset = ['nickname']).pipe(lambda x: x.loc[x.nickname.str.contains('赛')])
-
+#msgat data persistence
+msgat.to_pickle(r'../records/sample/msgat_dataframe')
 '''
 #ToDO
 用聊天日志中的@名称去匹配displaynames，发现有很多找不到（6701个昵称找不到），试图通过昵称和房间号去nicknames的四个表中去寻找；
