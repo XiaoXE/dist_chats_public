@@ -10,6 +10,7 @@ copy the base functions from classifiertrain.py
 import datetime
 import scipy.stats as st
 import numpy as np
+import multiprocessing as mp
 
 def sumDicts(dict1,dict2):
     """Sum dict1 with dict2, only 2.
@@ -41,6 +42,7 @@ def probMultiTfidf(probArray, tfidfList):
 
 def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, auther_scale, conver_scale, temporal_scale, divideN, twindow):
     """Expand the raw msg in a Dataframe with its context info.
+    :param twindow: time window when expanding raw msg
     :param temporal_scale: as name shows
     :param conver_scale: as name shows
     :param auther_scale: as name shows
@@ -51,7 +53,7 @@ def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, aut
     :param w_auther:  weight of auther context
     :param w_conver:  weight of conversational context
     :param w_temp:  weight of temperal context
-    :return:  A list of expanded msgs
+    :return:  4 Lists, should be combined using expandedMsg function.
     """
     def autherProb(row, t_scale, contextdf, w_auther):
         """Expand the context-free info of msgi with auther context.
@@ -64,9 +66,9 @@ def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, aut
         Returns:
             The return vector. The expand vector repretation of msgi with info from its auther context.
         """
-        msgid = row[2]
-        sender = row[6]
-        msgdate = row[4]
+        msgid = row[1]
+        sender = row[4]
+        msgdate = row[2]
 
         autherContext = contextdf[(contextdf.sender == sender) & (contextdf.msgSvrId != msgid)]
         timediff = autherContext['createTime'] - msgdate
@@ -91,9 +93,9 @@ def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, aut
         Returns:
             The return vector. The expand vector repretation of msgi with info from its conversational context.
         """
-        msgid = row[2]
-        sender = row[6]
-        msgdate = row[4]
+        msgid = row[1]
+        sender = row[4]
+        msgdate = row[2]
         # maxdate = msgdate + datetime.timedelta(days = 1)
         # mindate = msgdate - datetime.timedelta(days = 1)
         # threadid = row[10]
@@ -126,11 +128,9 @@ def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, aut
             The return vector. The expand vector repretation of msgi with info from its temporal context.
 
         """
-        msgid = row[2]
-        # sender = row[6]
-        msgdate = row[4]
+        msgid = row[1]
+        msgdate = row[2]
 
-        # threadid = row[10]
         tempContext = contextdf[(contextdf.msgSvrId != msgid)]
         timediff = tempContext['createTime'] - msgdate
         timediff = timediff.tolist()  # in seconds
@@ -157,18 +157,28 @@ def ExpandDF(totalmsgdf, msgatdf, w_contextFree, w_auther, w_conver, w_temp, aut
                          {k: (v * w_contextFree) for k, v in contextFree[i].items()}) for i in range(len(contextFree))]
 
 
-    auther_expand_list, conv_expand_list, temp_expand_list = [],[],[]
+    auther_expand_list, conv_expand_list, temp_expand_list, msgidlist = [],[],[],[]
     for date in totalmsgdf['createTime'].dt.date.unique():
-        maxdate = datetime.datetime(date.year, date.month, date.day) + datetime.timedelta(days=twindow + 1)
-        mindate = datetime.datetime(date.year, date.month, date.day) - datetime.timedelta(days=twindow)
-        # slice the msgat dataframe with bounded time period
-        msgat = msgatdf[(msgatdf.createTime > mindate) & (msgatdf.createTime < maxdate)]
-        contextdf = totalmsgdf[(totalmsgdf.createTime > mindate) & (totalmsgdf.createTime < maxdate)]
-        targetdf = totalmsgdf[totalmsgdf.createTime.dt.date == date]
-        for row in targetdf.itertuples():
-            auther_expand_list.append(autherProb(row, auther_scale, contextdf, w_auther))
-            conv_expand_list.append(converProb(row, conver_scale, contextdf, msgat, w_conver))
-            temp_expand_list.append(tempProb(row, temporal_scale, contextdf, w_temp))
+        for talker in totalmsgdf['talker'].unique():
+            maxdate = datetime.datetime(date.year, date.month, date.day) + datetime.timedelta(days=twindow + 1)
+            mindate = datetime.datetime(date.year, date.month, date.day) - datetime.timedelta(days=twindow)
+            # slice the msgat dataframe with bounded time period
+            msgat = msgatdf[(msgatdf.createTime > mindate) & (msgatdf.createTime < maxdate) & (msgatdf.talker == talker)]
 
-    return expandedMsg(totalmsgdf['tfidf'].tolist(), auther_expand_list, conv_expand_list, temp_expand_list,
-                                   w_contextFree)
+            # 还需要限制在同一个聊天室中
+            contextdf = totalmsgdf[(totalmsgdf.createTime > mindate) & (totalmsgdf.createTime < maxdate) & (totalmsgdf.talker == talker)]
+            targetdf = totalmsgdf[(totalmsgdf.createTime.dt.date == date) & (totalmsgdf.talker == talker)]
+            cnt = 0
+            for row in targetdf.itertuples():
+                print(date, cnt)
+                cnt +=1
+                msgidlist.append(row[1])
+                auther_expand_list.append(autherProb(row, auther_scale, contextdf, w_auther))
+                conv_expand_list.append(converProb(row, conver_scale, contextdf, msgat, w_conver))
+                temp_expand_list.append(tempProb(row, temporal_scale, contextdf, w_temp))
+            '''
+            [[autherProb(row, auther_scale, contextdf, w_auther),converProb(row, conver_scale, contextdf, msgat, w_conver),tempProb(row, temporal_scale, contextdf, w_temp)] for row in targetdf.itertuples()]
+            '''
+    return msgidlist,auther_expand_list,conv_expand_list,temp_expand_list
+    #下面的return的结果是不对的，因为auther_expand_list中都是按照日期和聊天房组织的，但totalmsgdf却不是，所以会造成乱序
+    #return expandedMsg(totalmsgdf['tfidf'].tolist(), auther_expand_list, conv_expand_list, temp_expand_list,w_contextFree)
